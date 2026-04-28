@@ -1286,7 +1286,7 @@ export class ChatService extends Disposable implements IChatService {
 						!options?.agentIdSilent
 					) {
 						// We have no agent or command to scope history with, pass the full history to the participant detection provider
-						const defaultAgentHistory = this.getHistoryEntriesFromModel(requests, location, defaultAgent.id);
+						const defaultAgentHistory = this.getHistoryEntriesFromModel(requests, location, defaultAgent.id, options?.modeScopedHistory ? options.modeInfo : undefined);
 						const chatAgentRequest = buildAgentRequest(defaultAgent, undefined, enableCommandDetection, false);
 
 						const result = await this.chatAgentService.detectAgentOrCommand(chatAgentRequest, defaultAgentHistory, { location }, token);
@@ -1304,7 +1304,7 @@ export class ChatService extends Disposable implements IChatService {
 					await this.extensionService.activateByEvent(`onChatParticipant:${agent.id}`);
 
 					// Recompute history in case the agent or command changed
-					const history = this.getHistoryEntriesFromModel(requests, location, agent.id);
+					const history = this.getHistoryEntriesFromModel(requests, location, agent.id, options?.modeScopedHistory ? options.modeInfo : undefined);
 					const requestProps = buildAgentRequest(agent, command, enableCommandDetection, !!detectedAgent);
 					this.generateInitialChatTitleIfNeeded(model, requestProps, defaultAgent, token);
 					const pendingRequest = this._pendingRequests.get(sessionResource);
@@ -1630,11 +1630,15 @@ export class ChatService extends Disposable implements IChatService {
 		return attachedContextVariables;
 	}
 
-	private getHistoryEntriesFromModel(requests: IChatRequestModel[], location: ChatAgentLocation, forAgentId: string): IChatAgentHistoryEntry[] {
+	private getHistoryEntriesFromModel(requests: IChatRequestModel[], location: ChatAgentLocation, forAgentId: string, forModeInfo?: IChatRequestModeInfo): IChatAgentHistoryEntry[] {
 		const history: IChatAgentHistoryEntry[] = [];
 		const agent = this.chatAgentService.getAgent(forAgentId);
 		for (const request of requests) {
 			if (!request.response) {
+				continue;
+			}
+
+			if (forModeInfo && !isSameChatRequestMode(request.modeInfo, forModeInfo)) {
 				continue;
 			}
 
@@ -1882,6 +1886,26 @@ export class ChatService extends Disposable implements IChatService {
 		}
 		return localSessionId;
 	}
+}
+
+function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, target: IChatRequestModeInfo): boolean {
+	if (!candidate) {
+		return false;
+	}
+
+	const candidateInstructionsUri = candidate.modeInstructions?.uri?.toString();
+	const targetInstructionsUri = target.modeInstructions?.uri?.toString();
+	if (candidateInstructionsUri || targetInstructionsUri) {
+		return candidateInstructionsUri === targetInstructionsUri;
+	}
+
+	if (candidate.modeId || target.modeId) {
+		return candidate.modeId === target.modeId;
+	}
+
+	const candidateModeName = candidate.modeInstructions?.name ?? candidate.modeName;
+	const targetModeName = target.modeInstructions?.name ?? target.modeName;
+	return candidateModeName !== undefined && candidateModeName === targetModeName;
 }
 
 export async function chatModelToChatDetail(model: IChatModel): Promise<IChatDetail> {
