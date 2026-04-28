@@ -1893,7 +1893,11 @@ function getModeScopedHistoryModeInfo(options: IChatSendRequestOptions | undefin
 		return undefined;
 	}
 
-	return options.modeScopedHistory || options.modeInfo.modeId === 'custom' ? options.modeInfo : undefined;
+	if (options.modeScopedHistory || options.modeInfo.modeId === 'custom') {
+		return options.modeInfo;
+	}
+
+	return undefined;
 }
 
 function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, target: IChatRequestModeInfo): boolean {
