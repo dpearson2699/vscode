@@ -6,10 +6,11 @@
 import assert from 'assert';
 import { constObservable, observableValue } from '../../../../../base/common/observable.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { buildCustomAgentHandoffsInfo, getHandoffId, IChatMode } from '../../common/chatModes.js';
+import { buildCustomAgentHandoffsInfo, getHandoffId, IChatMode, resolveHandoffTargetMode } from '../../common/chatModes.js';
 import { ChatModeKind } from '../../common/constants.js';
 import { IHandOff } from '../../common/promptSyntax/promptFileParser.js';
 import { Target } from '../../common/promptSyntax/promptTypes.js';
+import { MockChatModeService } from './mockChatModeService.js';
 
 function createMockMode(overrides: Partial<IChatMode> & { id: string; kind: ChatModeKind }): IChatMode {
 	return {
@@ -126,5 +127,71 @@ suite('buildCustomAgentHandoffsInfo', () => {
 		assert.strictEqual(info.send, undefined);
 		assert.strictEqual(info.showContinueOn, undefined);
 		assert.strictEqual(info.model, undefined);
+	});
+});
+
+suite('resolveHandoffTargetMode', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('should resolve exact and unambiguous handoff targets', () => {
+		const fixIssueMode = createMockMode({
+			id: 'file:///agents/fix-issue.agent.md',
+			name: constObservable('Fix Issue'),
+			kind: ChatModeKind.Agent,
+		});
+		const reviewMode = createMockMode({
+			id: 'file:///agents/review.agent.md',
+			name: constObservable('Review'),
+			kind: ChatModeKind.Agent,
+		});
+		const service = new MockChatModeService({ builtin: [], custom: [fixIssueMode, reviewMode] });
+
+		const resolvedIds = [
+			resolveHandoffTargetMode(service, 'Fix Issue')?.id,
+			resolveHandoffTargetMode(service, 'file:///agents/fix-issue.agent.md')?.id,
+			resolveHandoffTargetMode(service, 'fix issue')?.id,
+			resolveHandoffTargetMode(service, 'FILE:///AGENTS/FIX-ISSUE.AGENT.MD')?.id,
+			resolveHandoffTargetMode(service, 'missing')?.id,
+		];
+
+		assert.deepStrictEqual(resolvedIds, [
+			'file:///agents/fix-issue.agent.md',
+			'file:///agents/fix-issue.agent.md',
+			'file:///agents/fix-issue.agent.md',
+			'file:///agents/fix-issue.agent.md',
+			undefined,
+		]);
+	});
+
+	test('should prefer exact names over exact ids', () => {
+		const idMatchMode = createMockMode({
+			id: 'shared-target',
+			name: constObservable('ID Match'),
+			kind: ChatModeKind.Agent,
+		});
+		const nameMatchMode = createMockMode({
+			id: 'name-match',
+			name: constObservable('shared-target'),
+			kind: ChatModeKind.Agent,
+		});
+		const service = new MockChatModeService({ builtin: [], custom: [idMatchMode, nameMatchMode] });
+
+		assert.strictEqual(resolveHandoffTargetMode(service, 'shared-target')?.id, 'name-match');
+	});
+
+	test('should not resolve ambiguous case-insensitive handoff targets', () => {
+		const firstMode = createMockMode({
+			id: 'file:///agents/fix-issue.agent.md',
+			name: constObservable('Fix Issue'),
+			kind: ChatModeKind.Agent,
+		});
+		const secondMode = createMockMode({
+			id: 'file:///agents/fix-issue-local.agent.md',
+			name: constObservable('fix issue'),
+			kind: ChatModeKind.Agent,
+		});
+		const service = new MockChatModeService({ builtin: [], custom: [firstMode, secondMode] });
+
+		assert.strictEqual(resolveHandoffTargetMode(service, 'FIX ISSUE'), undefined);
 	});
 });

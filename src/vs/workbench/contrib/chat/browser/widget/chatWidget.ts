@@ -54,7 +54,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { applyingChatEditsFailedContextKey, decidedChatEditingResourceContextKey, hasAppliedChatEditsContextKey, hasUndecidedChatEditingResourceContextKey, IChatEditingService, IChatEditingSession, inChatEditingSessionContextKey, ModifiedFileEntryState } from '../../common/editing/chatEditingService.js';
 import { IChatLayoutService } from '../../common/widget/chatLayoutService.js';
 import { IChatModel, IChatModelInputState, IChatResponseModel } from '../../common/model/chatModel.js';
-import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModeService } from '../../common/chatModes.js';
+import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModeService, resolveHandoffTargetMode } from '../../common/chatModes.js';
 import { chatAgentLeader, ChatRequestAgentPart, ChatRequestDynamicVariablePart, ChatRequestSlashPromptPart, ChatRequestToolPart, ChatRequestToolSetPart, chatSubcommandLeader, formatChatQuestion, IParsedChatRequest } from '../../common/requestParser/chatParserTypes.js';
 import { ChatRequestParser } from '../../common/requestParser/chatRequestParser.js';
 import { getDynamicVariablesForWidget, getSelectedToolAndToolSetsForWidget } from '../attachments/chatVariables.js';
@@ -78,6 +78,7 @@ import { ChatInputPart, IChatInputPartOptions, IChatInputStyles } from './input/
 import { IChatListItemTemplate } from './chatListRenderer.js';
 import { ChatListWidget } from './chatListWidget.js';
 import { ChatEditorOptions } from './chatOptions.js';
+import { ensureChatHandoffTargetMode, executeChatHandoff, type IChatHandoffAgentSwitchResult, type IChatHandoffExecutionResult } from './chatHandoffExecution.js';
 import { ChatViewWelcomePart, IChatViewWelcomeContent } from '../viewsWelcome/chatViewWelcomeController.js';
 import { IChatTipService } from '../chatTipService.js';
 import { ChatTipContentPart } from './chatContentParts/chatTipContentPart.js';
@@ -1259,11 +1260,16 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// Fall back to the current mode picker for old sessions where modeInfo was not persisted.
 		const modeInfo = lastItem.model.request?.modeInfo;
 		let responseMode: IChatMode | undefined;
-		if (modeInfo?.modeInstructions?.name) {
-			responseMode = this.chatModeService.findModeByName(modeInfo.modeInstructions.name);
-		} else if (modeInfo?.modeId) {
+		if (modeInfo?.modeInstructions?.uri) {
+			responseMode = this.chatModeService.findModeById(modeInfo.modeInstructions.uri.toString());
+		}
+		if (!responseMode && modeInfo?.modeInstructions?.name) {
+			responseMode = resolveHandoffTargetMode(this.chatModeService, modeInfo.modeInstructions.name);
+		}
+		if (!responseMode && modeInfo?.modeId) {
 			responseMode = this.chatModeService.findModeById(modeInfo.modeId);
-		} else {
+		}
+		if (!responseMode) {
 			responseMode = this.input.currentModeObs.get();
 		}
 
@@ -1314,7 +1320,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		// Log telemetry
 		const currentMode = this.input.currentModeObs.get();
-		const toMode = handoff.agent ? this.chatModeService.findModeByName(handoff.agent) : undefined;
+		const toMode = handoff.agent ? resolveHandoffTargetMode(this.chatModeService, handoff.agent) : undefined;
 		this.telemetryService.publicLog2<ChatHandoffClickEvent, ChatHandoffClickClassification>('chat.handoffClicked', {
 			fromAgent: getModeNameForTelemetry(currentMode),
 			toAgent: agentId || (toMode ? getModeNameForTelemetry(toMode) : ''),
@@ -1328,39 +1334,26 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		});
 	}
 
-	async executeHandoff(handoff: IHandOff, agentId?: string): Promise<void> {
+	async executeHandoff(handoff: IHandOff, agentId?: string): Promise<IChatHandoffExecutionResult> {
 		this.chatSuggestNextWidget.hide();
 
-		const promptToUse = handoff.prompt;
+		const result = await executeChatHandoff(handoff, agentId, {
+			switchToAgent: agentName => this._switchToAgentByName(agentName),
+			switchModelByQualifiedName: qualifiedModelNames => this.input.switchModelByQualifiedName(qualifiedModelNames),
+			setInputValue: value => this.input.setValue(value, false),
+			focusInput: () => this.input.focus(),
+			acceptInput: handoffTargetModeId => {
+				const target = agentId ? `@${agentId}` : handoff.agent;
+				this.acceptInput(undefined, { handoffTargetModeId })
+					.catch(e => this.logService.error(`[Handoff] Failed to submit handoff '${handoff.label}' to '${target}'`, e));
+			}
+		});
 
-		// If agentId is provided (from chevron dropdown), delegate to that chat session
-		// Otherwise, switch to the handoff agent
-		if (agentId) {
-			// Delegate to chat session (e.g., @background or @cloud)
-			this.input.setValue(`@${agentId} ${promptToUse}`, false);
-			this.input.focus();
-			// Auto-submit for delegated chat sessions
-			this.acceptInput().catch(e => this.logService.error(`[Handoff] Failed to submit delegated handoff to '@${agentId}'`, e));
-		} else if (handoff.agent) {
-			// Regular handoff to specified agent
-			const switched = await this._switchToAgentByName(handoff.agent);
-			if (!switched) {
-				this.logService.warn(`[Handoff] Did not execute handoff '${handoff.label}' to '${handoff.agent}' because switching agents was unsuccessful`);
-				return;
-			}
-			// Switch to the specified model if provided
-			if (handoff.model) {
-				this.input.switchModelByQualifiedName([handoff.model]);
-			}
-			// Insert the handoff prompt into the input
-			this.input.setValue(promptToUse, false);
-			this.input.focus();
-
-			// Auto-submit if send flag is true
-			if (handoff.send) {
-				this.acceptInput().catch(e => this.logService.error(`[Handoff] Failed to submit handoff to '${handoff.agent}'`, e));
-			}
+		if (!result.success) {
+			this.logService.warn(`[Handoff] Did not execute handoff '${handoff.label}' to '${handoff.agent}' because ${result.error}`);
 		}
+
+		return result;
 	}
 
 	async handleDelegationExitIfNeeded(sourceAgent: Pick<IChatAgentData, 'id' | 'name'> | undefined, targetAgent: IChatAgentData | undefined): Promise<void> {
@@ -2373,6 +2366,10 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			return;
 		}
 
+		if (options.handoffTargetModeId && !this._ensureHandoffTargetMode(options.handoffTargetModeId, 'before submit')) {
+			return;
+		}
+
 		// Check if a custom submit handler wants to handle this submission
 		if (this.viewOptions.submitHandler) {
 			const inputValue = !query ? this.getInput() : query.query;
@@ -2489,11 +2486,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			}
 			this.viewModel.model.setCheckpoint(undefined);
 		}
-		// Capture instruction-collection parameters synchronously — the service
-		// will collect instructions asynchronously after showing the request in the UI.
-		const enabledTools = this.input.currentModeKind === ChatModeKind.Agent ? this.input.selectedToolsModel.userSelectedTools.get() : undefined;
-		const enabledSubAgents = this.input.currentModeKind === ChatModeKind.Agent ? this.input.currentModeObs.get().agents?.get() : undefined;
-
 		// Expand directory attachments: extract images as binary entries
 		const resolvedImageVariables = await this._resolveDirectoryImageAttachments(requestInputs.attachedContext.asArray());
 		const submittedSessionResource = this.viewModel.sessionResource;
@@ -2502,6 +2494,15 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// the contribution explicitly opts in via autoAttachReferences.
 		const contribution = this._lockedAgent ? this.chatSessionsService.getChatSessionContribution(this._lockedAgent.id) : undefined;
 		const autoAttachEnabled = contribution ? contribution.autoAttachReferences === true : true;
+
+		if (options.handoffTargetModeId && !this._ensureHandoffTargetMode(options.handoffTargetModeId, 'before send')) {
+			return;
+		}
+
+		// Capture instruction-collection parameters synchronously — the service
+		// will collect instructions asynchronously after showing the request in the UI.
+		const enabledTools = this.input.currentModeKind === ChatModeKind.Agent ? this.input.selectedToolsModel.userSelectedTools.get() : undefined;
+		const enabledSubAgents = this.input.currentModeKind === ChatModeKind.Agent ? this.input.currentModeObs.get().agents?.get() : undefined;
 
 		const result = await this.chatService.sendRequest(this.viewModel.sessionResource, requestInputs.input, {
 			userSelectedModelId: this.input.currentLanguageModel,
@@ -2848,32 +2849,53 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		this.agentInInput.set(!!currentAgent);
 	}
 
-	private async _switchToAgentByName(agentName: string): Promise<boolean> {
+	private _ensureHandoffTargetMode(handoffTargetModeId: string, phase: string): boolean {
+		return ensureChatHandoffTargetMode(handoffTargetModeId, phase, {
+			getCurrentModeId: () => this.input.currentModeObs.get().id,
+			setChatMode: modeId => this.input.setChatMode(modeId),
+			logDebug: message => this.logService.debug(message),
+			logWarning: message => this.logService.warn(message),
+		});
+	}
+
+	private async _switchToAgentByName(agentName: string): Promise<IChatHandoffAgentSwitchResult> {
 		const currentAgent = this.input.currentModeObs.get();
+		const agent = resolveHandoffTargetMode(this.chatModeService, agentName);
+		if (!agent) {
+			return { success: false, reason: `target agent '${agentName}' was not found` };
+		}
 
 		// already on the target agent
-		if (agentName === currentAgent.name.get()) {
-			return true;
+		if (currentAgent.id === agent.id) {
+			return { success: true, mode: agent };
 		}
 
-		// Find the mode object to get its kind
-		const agent = this.chatModeService.findModeByName(agentName);
-		if (!agent) {
-			return false;
-		}
-
+		this.logService.debug(`[Handoff] Switching target agent: requested='${agentName}', sourceMode='${currentAgent.id}', targetMode='${agent.id}'`);
 		if (currentAgent.kind !== agent.kind) {
 			const chatModeCheck = await this.instantiationService.invokeFunction(handleModeSwitch, currentAgent.kind, agent.kind, this.viewModel?.model.getRequests().length ?? 0, this.viewModel?.model);
 			if (!chatModeCheck) {
-				return false;
+				return { success: false, reason: `mode switch from '${currentAgent.kind}' to '${agent.kind}' was cancelled`, mode: agent };
 			}
 
 			if (chatModeCheck.needToClearSession) {
 				await this.clear();
 			}
 		}
+
 		this.input.setChatMode(agent.id);
-		return true;
+
+		const verifiedAgent = this.input.currentModeObs.get();
+		if (verifiedAgent.id !== agent.id) {
+			return { success: false, reason: `active mode is '${verifiedAgent.id}' after switching to '${agent.id}'`, mode: agent };
+		}
+
+		const modeInstructions = this.input.currentModeInfo.modeInstructions;
+		if (!agent.isBuiltin && modeInstructions?.name && modeInstructions.name !== agent.name.get()) {
+			return { success: false, reason: `active mode instructions are '${modeInstructions.name}' after switching to '${agent.name.get()}'`, mode: agent };
+		}
+
+		this.logService.debug(`[Handoff] Switched target agent: requested='${agentName}', activeMode='${verifiedAgent.id}'`);
+		return { success: true, mode: agent };
 	}
 
 	/**
@@ -2888,8 +2910,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 		// switch to appropriate agent if needed
 		if (agent) {
-			const switched = await this._switchToAgentByName(agent);
-			if (!switched) {
+			const switchResult = await this._switchToAgentByName(agent);
+			if (!switchResult.success) {
 				return false;
 			}
 		}
