@@ -46,7 +46,7 @@ import { ChatRequestQueueKind, ChatSendResult, IChatFollowup, IChatModelReferenc
 import { ChatService } from '../../../common/chatService/chatServiceImpl.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../common/constants.js';
 import { ChatEditingSessionState, IChatEditingService, IChatEditingSession, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
-import { ChatModel, IChatModel, ISerializableChatData } from '../../../common/model/chatModel.js';
+import { ChatModel, IChatModel, IChatRequestModeInfo, ISerializableChatData } from '../../../common/model/chatModel.js';
 import { LocalChatSessionUri } from '../../../common/model/chatUri.js';
 import { ChatAgentService, IChatAgent, IChatAgentData, IChatAgentImplementation, IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ChatSlashCommandService, IChatSlashCommandService } from '../../../common/participants/chatSlashCommands.js';
@@ -454,6 +454,55 @@ suite('ChatService', () => {
 		await response3.data.responseCompletePromise;
 		assert.strictEqual(model.getRequests().length, 3);
 		assert.strictEqual(model.getRequests()[2].response?.result?.metadata?.historyLength, 2);
+	});
+
+	test('mode-scoped history skips requests from other custom modes', async () => {
+		const historyModeAgent: IChatAgentImplementation = {
+			async invoke(request, progress, history, token) {
+				return {
+					metadata: { historyModes: history.map(entry => entry.request.modeInstructions?.name) }
+				};
+			},
+		};
+
+		const createModeInfo = (name: string): IChatRequestModeInfo => ({
+			kind: ChatModeKind.Agent,
+			isBuiltin: false,
+			modeInstructions: {
+				uri: URI.parse(`file:///agents/${name}.agent.md`),
+				name,
+				content: `${name} instructions`,
+				toolReferences: [],
+			},
+			modeId: 'custom',
+			modeName: name,
+			applyCodeBlockSuggestionId: undefined,
+		});
+
+		testDisposables.add(chatAgentService.registerAgent('historyModeAgent', { ...getAgentData('historyModeAgent'), modes: [ChatModeKind.Agent], isDefault: true }));
+		testDisposables.add(chatAgentService.registerAgentImplementation('historyModeAgent', historyModeAgent));
+
+		const testService = createChatService();
+		const modelRef = testDisposables.add(startSessionModel(testService));
+		const model = modelRef.object;
+		const plannerModeInfo = createModeInfo('fix-planner-vbw');
+		const issueModeInfo = createModeInfo('fix-issue-vbw');
+
+		const plannerResponse = await testService.sendRequest(model.sessionResource, 'plan the fix', { agentId: 'historyModeAgent', modeInfo: plannerModeInfo });
+		ChatSendResult.assertSent(plannerResponse);
+		await plannerResponse.data.responseCompletePromise;
+
+		const scopedIssueResponse = await testService.sendRequest(model.sessionResource, 'start implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo, modeScopedHistory: true });
+		ChatSendResult.assertSent(scopedIssueResponse);
+		const scopedIssueResponseModel = await scopedIssueResponse.data.responseCreatedPromise;
+		await scopedIssueResponse.data.responseCompletePromise;
+		assert.deepStrictEqual(scopedIssueResponseModel.result?.metadata?.historyModes, []);
+
+		const secondScopedIssueResponse = await testService.sendRequest(model.sessionResource, 'continue implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo, modeScopedHistory: true });
+		ChatSendResult.assertSent(secondScopedIssueResponse);
+		const secondScopedIssueResponseModel = await secondScopedIssueResponse.data.responseCreatedPromise;
+		await secondScopedIssueResponse.data.responseCompletePromise;
+		assert.deepStrictEqual(secondScopedIssueResponseModel.result?.metadata?.historyModes, ['fix-issue-vbw']);
 	});
 
 	test('can serialize', async () => {
