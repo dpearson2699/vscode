@@ -12,6 +12,7 @@ import { CommandsRegistry } from '../../../../../../platform/commands/common/com
 import { TestInstantiationService } from '../../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
 import { GetHandoffsActionId, ExecuteHandoffActionId, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
+import type { IChatHandoffExecutionResult } from '../../../browser/widget/chatHandoffExecution.js';
 import { IChatMode, IChatModeService, ICustomAgentInfo } from '../../../common/chatModes.js';
 import { ChatModeKind } from '../../../common/constants.js';
 import { IHandOff } from '../../../common/promptSyntax/promptFileParser.js';
@@ -161,7 +162,7 @@ suite('ExecuteHandoffAction', () => {
 		handOffs: observableValue('handOffs', testHandoffs),
 	});
 
-	function createMockWidget(currentMode: IChatMode): { widget: Partial<IChatWidget>; executeHandoffCalls: IHandOff[] } {
+	function createMockWidget(currentMode: IChatMode, executeHandoffResult: IChatHandoffExecutionResult = { success: true, submitted: true }): { widget: Partial<IChatWidget>; executeHandoffCalls: IHandOff[] } {
 		const executeHandoffCalls: IHandOff[] = [];
 		const widget: Partial<IChatWidget> = {
 			input: {
@@ -169,6 +170,7 @@ suite('ExecuteHandoffAction', () => {
 			} as IChatWidget['input'],
 			executeHandoff: async (handoff: IHandOff) => {
 				executeHandoffCalls.push(handoff);
+				return executeHandoffResult;
 			},
 		};
 		return { widget, executeHandoffCalls };
@@ -331,5 +333,23 @@ suite('ExecuteHandoffAction', () => {
 		const result = await runCommandAsync<IExecuteHandoffResult>(handler, instantiationService, { id: 'implement:start-implementation' });
 		assert.strictEqual(result.success, false);
 		assert.ok(result.error?.includes('No handoffs available'));
+	});
+
+	test('should return error when widget aborts handoff execution', async () => {
+		const { widget, executeHandoffCalls } = createMockWidget(planMode, { success: false, error: 'target agent was not found' });
+
+		const mockWidgetService = new class extends MockChatWidgetService {
+			override readonly lastFocusedWidget = widget as IChatWidget;
+		};
+
+		instantiationService.set(IChatWidgetService, mockWidgetService);
+		instantiationService.set(IChatModeService, new MockChatModeService({ builtin: [], custom: [planMode] }));
+
+		const handler = CommandsRegistry.getCommand(ExecuteHandoffActionId)?.handler;
+		assert.ok(handler);
+
+		const result = await runCommandAsync<IExecuteHandoffResult>(handler, instantiationService, { id: 'implement:start-implementation' });
+		assert.deepStrictEqual(result, { success: false, targetMode: 'implement', error: 'target agent was not found' });
+		assert.strictEqual(executeHandoffCalls.length, 1);
 	});
 });
