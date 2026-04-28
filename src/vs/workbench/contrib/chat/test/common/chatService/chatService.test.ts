@@ -505,6 +505,73 @@ suite('ChatService', () => {
 		assert.deepStrictEqual(secondScopedIssueResponseModel.result?.metadata?.historyModes, ['fix-issue-vbw']);
 	});
 
+	test('custom mode history distinguishes custom modes without instruction uris', async () => {
+		const historyModeAgent: IChatAgentImplementation = {
+			async invoke(request, progress, history, token) {
+				return {
+					metadata: { historyModes: history.map(entry => entry.request.modeInstructions?.name) }
+				};
+			},
+		};
+
+		const createModeInfo = (name: string): IChatRequestModeInfo => ({
+			kind: ChatModeKind.Agent,
+			isBuiltin: false,
+			modeInstructions: {
+				name,
+				content: `${name} instructions`,
+				toolReferences: [],
+			},
+			modeId: 'custom',
+			modeName: name,
+			applyCodeBlockSuggestionId: undefined,
+		});
+		const createAgentModeInfo = (name: string): IChatRequestModeInfo => ({
+			kind: ChatModeKind.Agent,
+			isBuiltin: true,
+			modeInstructions: undefined,
+			modeId: 'agent',
+			modeName: name,
+			applyCodeBlockSuggestionId: undefined,
+		});
+
+		testDisposables.add(chatAgentService.registerAgent('historyModeAgentNoUri', { ...getAgentData('historyModeAgentNoUri'), modes: [ChatModeKind.Agent], isDefault: true }));
+		testDisposables.add(chatAgentService.registerAgentImplementation('historyModeAgentNoUri', historyModeAgent));
+
+		const testService = createChatService();
+		const modelRef = testDisposables.add(startSessionModel(testService));
+		const model = modelRef.object;
+		const plannerModeInfo = createModeInfo('fix-planner-vbw');
+		const issueModeInfo = createModeInfo('fix-issue-vbw');
+		const sameNameAgentModeInfo = createAgentModeInfo('fix-issue-vbw');
+
+		const sameNameAgentResponse = await testService.sendRequest(model.sessionResource, 'ask in same-named agent mode', { agentId: 'historyModeAgentNoUri', modeInfo: sameNameAgentModeInfo });
+		ChatSendResult.assertSent(sameNameAgentResponse);
+		await sameNameAgentResponse.data.responseCompletePromise;
+
+		const plannerResponse = await testService.sendRequest(model.sessionResource, 'plan the fix', { agentId: 'historyModeAgentNoUri', modeInfo: plannerModeInfo });
+		ChatSendResult.assertSent(plannerResponse);
+		await plannerResponse.data.responseCompletePromise;
+
+		const issueResponse = await testService.sendRequest(model.sessionResource, 'start implementation', { agentId: 'historyModeAgentNoUri', modeInfo: issueModeInfo });
+		ChatSendResult.assertSent(issueResponse);
+		const issueResponseModel = await issueResponse.data.responseCreatedPromise;
+		await issueResponse.data.responseCompletePromise;
+
+		const secondIssueResponse = await testService.sendRequest(model.sessionResource, 'continue implementation', { agentId: 'historyModeAgentNoUri', modeInfo: issueModeInfo });
+		ChatSendResult.assertSent(secondIssueResponse);
+		const secondIssueResponseModel = await secondIssueResponse.data.responseCreatedPromise;
+		await secondIssueResponse.data.responseCompletePromise;
+
+		assert.deepStrictEqual([
+			issueResponseModel.result?.metadata?.historyModes,
+			secondIssueResponseModel.result?.metadata?.historyModes,
+		], [
+			[],
+			['fix-issue-vbw'],
+		]);
+	});
+
 	test('can serialize', async () => {
 		testDisposables.add(chatAgentService.registerAgentImplementation(chatAgentWithUsedContextId, chatAgentWithUsedContext));
 		chatAgentService.updateAgent(chatAgentWithUsedContextId, {});

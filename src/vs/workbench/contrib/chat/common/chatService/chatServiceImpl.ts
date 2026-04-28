@@ -1907,12 +1907,18 @@ function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, targ
 		return candidateInstructionsUri === targetInstructionsUri;
 	}
 
+	const candidateIsCustom = candidate.modeId === 'custom';
+	const targetIsCustom = target.modeId === 'custom';
+	const candidateModeName = candidate.modeInstructions?.name ?? candidate.modeName;
+	const targetModeName = target.modeInstructions?.name ?? target.modeName;
+	if (candidateIsCustom || targetIsCustom) {
+		return candidateIsCustom === targetIsCustom && candidateModeName !== undefined && candidateModeName === targetModeName;
+	}
+
 	if (candidate.modeId || target.modeId) {
 		return candidate.modeId === target.modeId;
 	}
 
-	const candidateModeName = candidate.modeInstructions?.name ?? candidate.modeName;
-	const targetModeName = target.modeInstructions?.name ?? target.modeName;
 	return candidateModeName !== undefined && candidateModeName === targetModeName;
 }
 
