@@ -1286,7 +1286,7 @@ export class ChatService extends Disposable implements IChatService {
 						!options?.agentIdSilent
 					) {
 						// We have no agent or command to scope history with, pass the full history to the participant detection provider
-						const defaultAgentHistory = this.getHistoryEntriesFromModel(requests, location, defaultAgent.id, getModeScopedHistoryModeInfo(options));
+						const defaultAgentHistory = this.getHistoryEntriesFromModel(requests, location, defaultAgent.id, options?.modeScopedHistory ? options.modeInfo : undefined);
 						const chatAgentRequest = buildAgentRequest(defaultAgent, undefined, enableCommandDetection, false);
 
 						const result = await this.chatAgentService.detectAgentOrCommand(chatAgentRequest, defaultAgentHistory, { location }, token);
@@ -1304,7 +1304,7 @@ export class ChatService extends Disposable implements IChatService {
 					await this.extensionService.activateByEvent(`onChatParticipant:${agent.id}`);
 
 					// Recompute history in case the agent or command changed
-					const history = this.getHistoryEntriesFromModel(requests, location, agent.id, getModeScopedHistoryModeInfo(options));
+					const history = this.getHistoryEntriesFromModel(requests, location, agent.id, options?.modeScopedHistory ? options.modeInfo : undefined);
 					const requestProps = buildAgentRequest(agent, command, enableCommandDetection, !!detectedAgent);
 					this.generateInitialChatTitleIfNeeded(model, requestProps, defaultAgent, token);
 					const pendingRequest = this._pendingRequests.get(sessionResource);
@@ -1631,10 +1631,15 @@ export class ChatService extends Disposable implements IChatService {
 	}
 
 	private getHistoryEntriesFromModel(requests: IChatRequestModel[], location: ChatAgentLocation, forAgentId: string, forModeInfo?: IChatRequestModeInfo): IChatAgentHistoryEntry[] {
+	private getHistoryEntriesFromModel(requests: IChatRequestModel[], location: ChatAgentLocation, forAgentId: string, forModeInfo?: IChatRequestModeInfo): IChatAgentHistoryEntry[] {
 		const history: IChatAgentHistoryEntry[] = [];
 		const agent = this.chatAgentService.getAgent(forAgentId);
 		for (const request of requests) {
 			if (!request.response) {
+				continue;
+			}
+
+			if (forModeInfo && !isSameChatRequestMode(request.modeInfo, forModeInfo)) {
 				continue;
 			}
 

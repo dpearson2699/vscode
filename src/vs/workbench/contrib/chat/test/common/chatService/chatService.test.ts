@@ -47,6 +47,7 @@ import { ChatService } from '../../../common/chatService/chatServiceImpl.js';
 import { ChatAgentLocation, ChatModeKind } from '../../../common/constants.js';
 import { ChatEditingSessionState, IChatEditingService, IChatEditingSession, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
 import { ChatModel, IChatModel, IChatRequestModeInfo, ISerializableChatData } from '../../../common/model/chatModel.js';
+import { ChatModel, IChatModel, IChatRequestModeInfo, ISerializableChatData } from '../../../common/model/chatModel.js';
 import { LocalChatSessionUri } from '../../../common/model/chatUri.js';
 import { ChatAgentService, IChatAgent, IChatAgentData, IChatAgentImplementation, IChatAgentService } from '../../../common/participants/chatAgents.js';
 import { ChatSlashCommandService, IChatSlashCommandService } from '../../../common/participants/chatSlashCommands.js';
@@ -456,7 +457,7 @@ suite('ChatService', () => {
 		assert.strictEqual(model.getRequests()[2].response?.result?.metadata?.historyLength, 2);
 	});
 
-	test('custom mode history skips requests from other custom modes', async () => {
+	test('mode-scoped history skips requests from other custom modes', async () => {
 		const historyModeAgent: IChatAgentImplementation = {
 			async invoke(request, progress, history, token) {
 				return {
@@ -492,13 +493,13 @@ suite('ChatService', () => {
 		ChatSendResult.assertSent(plannerResponse);
 		await plannerResponse.data.responseCompletePromise;
 
-		const scopedIssueResponse = await testService.sendRequest(model.sessionResource, 'start implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo });
+		const scopedIssueResponse = await testService.sendRequest(model.sessionResource, 'start implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo, modeScopedHistory: true });
 		ChatSendResult.assertSent(scopedIssueResponse);
 		const scopedIssueResponseModel = await scopedIssueResponse.data.responseCreatedPromise;
 		await scopedIssueResponse.data.responseCompletePromise;
 		assert.deepStrictEqual(scopedIssueResponseModel.result?.metadata?.historyModes, []);
 
-		const secondScopedIssueResponse = await testService.sendRequest(model.sessionResource, 'continue implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo });
+		const secondScopedIssueResponse = await testService.sendRequest(model.sessionResource, 'continue implementation', { agentId: 'historyModeAgent', modeInfo: issueModeInfo, modeScopedHistory: true });
 		ChatSendResult.assertSent(secondScopedIssueResponse);
 		const secondScopedIssueResponseModel = await secondScopedIssueResponse.data.responseCreatedPromise;
 		await secondScopedIssueResponse.data.responseCompletePromise;
