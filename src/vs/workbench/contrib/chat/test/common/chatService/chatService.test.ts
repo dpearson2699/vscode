@@ -572,6 +572,55 @@ suite('ChatService', () => {
 		]);
 	});
 
+	test('custom mode history matches same custom mode when one side lacks an instruction uri', async () => {
+		const historyModeAgent: IChatAgentImplementation = {
+			async invoke(request, progress, history, token) {
+				return {
+					metadata: { historyModes: history.map(entry => entry.request.modeInstructions?.name) }
+				};
+			},
+		};
+
+		const createModeInfo = (name: string, includeUri: boolean): IChatRequestModeInfo => ({
+			kind: ChatModeKind.Agent,
+			isBuiltin: false,
+			modeInstructions: {
+				...(includeUri ? { uri: URI.parse(`file:///agents/${name}.agent.md`) } : {}),
+				name,
+				content: `${name} instructions`,
+				toolReferences: [],
+			},
+			modeId: 'custom',
+			modeName: name,
+			applyCodeBlockSuggestionId: undefined,
+		});
+
+		testDisposables.add(chatAgentService.registerAgent('historyModeAgentMixedUri', { ...getAgentData('historyModeAgentMixedUri'), modes: [ChatModeKind.Agent], isDefault: true }));
+		testDisposables.add(chatAgentService.registerAgentImplementation('historyModeAgentMixedUri', historyModeAgent));
+
+		const testService = createChatService();
+		const modelRef = testDisposables.add(startSessionModel(testService));
+		const model = modelRef.object;
+		const issueModeWithoutUri = createModeInfo('fix-issue-vbw', false);
+		const plannerModeWithUri = createModeInfo('fix-planner-vbw', true);
+		const issueModeWithUri = createModeInfo('fix-issue-vbw', true);
+
+		const issueWithoutUriResponse = await testService.sendRequest(model.sessionResource, 'start implementation without uri', { agentId: 'historyModeAgentMixedUri', modeInfo: issueModeWithoutUri });
+		ChatSendResult.assertSent(issueWithoutUriResponse);
+		await issueWithoutUriResponse.data.responseCompletePromise;
+
+		const plannerResponse = await testService.sendRequest(model.sessionResource, 'plan the fix', { agentId: 'historyModeAgentMixedUri', modeInfo: plannerModeWithUri });
+		ChatSendResult.assertSent(plannerResponse);
+		await plannerResponse.data.responseCompletePromise;
+
+		const issueWithUriResponse = await testService.sendRequest(model.sessionResource, 'continue implementation with uri', { agentId: 'historyModeAgentMixedUri', modeInfo: issueModeWithUri });
+		ChatSendResult.assertSent(issueWithUriResponse);
+		const issueWithUriResponseModel = await issueWithUriResponse.data.responseCreatedPromise;
+		await issueWithUriResponse.data.responseCompletePromise;
+
+		assert.deepStrictEqual(issueWithUriResponseModel.result?.metadata?.historyModes, ['fix-issue-vbw']);
+	});
+
 	test('can serialize', async () => {
 		testDisposables.add(chatAgentService.registerAgentImplementation(chatAgentWithUsedContextId, chatAgentWithUsedContext));
 		chatAgentService.updateAgent(chatAgentWithUsedContextId, {});

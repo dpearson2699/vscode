@@ -1903,7 +1903,7 @@ function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, targ
 
 	const candidateInstructionsUri = candidate.modeInstructions?.uri?.toString();
 	const targetInstructionsUri = target.modeInstructions?.uri?.toString();
-	if (candidateInstructionsUri || targetInstructionsUri) {
+	if (candidateInstructionsUri && targetInstructionsUri) {
 		return candidateInstructionsUri === targetInstructionsUri;
 	}
 
