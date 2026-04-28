@@ -2525,6 +2525,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			noCommandDetection: options?.noCommandDetection,
 			...this.getModeRequestOptions(),
 			modeInfo: this.input.currentModeInfo,
+			modeScopedHistory: !!options.handoffTargetModeId,
 			agentIdSilent: this._lockedAgent?.id,
 			queue: options?.queue,
 			instructionContext: autoAttachEnabled ? {
