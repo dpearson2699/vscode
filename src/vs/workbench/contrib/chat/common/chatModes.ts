@@ -582,21 +582,26 @@ export function getModeNameForTelemetry(mode: IChatMode): string {
  * unambiguous.
  */
 export function resolveHandoffTargetMode(chatModeService: IChatModeService, target: string): IChatMode | undefined {
-	const modeByName = chatModeService.findModeByName(target);
+	const normalizedTarget = target.trim();
+	if (!normalizedTarget) {
+		return undefined;
+	}
+
+	const modeByName = chatModeService.findModeByName(normalizedTarget);
 	if (modeByName) {
 		return modeByName;
 	}
 
-	const modeById = chatModeService.findModeById(target);
+	const modeById = chatModeService.findModeById(normalizedTarget);
 	if (modeById) {
 		return modeById;
 	}
 
-	const normalizedTarget = target.toLowerCase();
+	const normalizedTargetLowercase = normalizedTarget.toLowerCase();
 	const { builtin, custom } = chatModeService.getModes();
 	const matches = new Set<IChatMode>();
 	for (const mode of [...builtin, ...custom]) {
-		if (mode.name.get().toLowerCase() === normalizedTarget || mode.id.toLowerCase() === normalizedTarget) {
+		if (mode.name.get().toLowerCase() === normalizedTargetLowercase || mode.id.toLowerCase() === normalizedTargetLowercase) {
 			matches.add(mode);
 		}
 	}

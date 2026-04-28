@@ -1893,7 +1893,11 @@ function getModeScopedHistoryModeInfo(options: IChatSendRequestOptions | undefin
 		return undefined;
 	}
 
-	return options.modeScopedHistory || options.modeInfo.modeId === 'custom' ? options.modeInfo : undefined;
+	if (options.modeScopedHistory || options.modeInfo.modeId === 'custom') {
+		return options.modeInfo;
+	}
+
+	return undefined;
 }
 
 function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, target: IChatRequestModeInfo): boolean {
@@ -1903,16 +1907,22 @@ function isSameChatRequestMode(candidate: IChatRequestModeInfo | undefined, targ
 
 	const candidateInstructionsUri = candidate.modeInstructions?.uri?.toString();
 	const targetInstructionsUri = target.modeInstructions?.uri?.toString();
-	if (candidateInstructionsUri || targetInstructionsUri) {
+	if (candidateInstructionsUri && targetInstructionsUri) {
 		return candidateInstructionsUri === targetInstructionsUri;
+	}
+
+	const candidateIsCustom = candidate.modeId === 'custom';
+	const targetIsCustom = target.modeId === 'custom';
+	const candidateModeName = candidate.modeInstructions?.name ?? candidate.modeName;
+	const targetModeName = target.modeInstructions?.name ?? target.modeName;
+	if (candidateIsCustom || targetIsCustom) {
+		return candidateIsCustom === targetIsCustom && candidateModeName !== undefined && candidateModeName === targetModeName;
 	}
 
 	if (candidate.modeId || target.modeId) {
 		return candidate.modeId === target.modeId;
 	}
 
-	const candidateModeName = candidate.modeInstructions?.name ?? candidate.modeName;
-	const targetModeName = target.modeInstructions?.name ?? target.modeName;
 	return candidateModeName !== undefined && candidateModeName === targetModeName;
 }
 

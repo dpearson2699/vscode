@@ -148,10 +148,12 @@ suite('resolveHandoffTargetMode', () => {
 
 		const resolvedIds = [
 			resolveHandoffTargetMode(service, 'Fix Issue')?.id,
+			resolveHandoffTargetMode(service, ' Fix Issue ')?.id,
 			resolveHandoffTargetMode(service, 'file:///agents/fix-issue.agent.md')?.id,
 			resolveHandoffTargetMode(service, 'fix issue')?.id,
 			resolveHandoffTargetMode(service, 'FILE:///AGENTS/FIX-ISSUE.AGENT.MD')?.id,
 			resolveHandoffTargetMode(service, 'missing')?.id,
+			resolveHandoffTargetMode(service, '   ')?.id,
 		];
 
 		assert.deepStrictEqual(resolvedIds, [
@@ -159,6 +161,8 @@ suite('resolveHandoffTargetMode', () => {
 			'file:///agents/fix-issue.agent.md',
 			'file:///agents/fix-issue.agent.md',
 			'file:///agents/fix-issue.agent.md',
+			'file:///agents/fix-issue.agent.md',
+			undefined,
 			undefined,
 		]);
 	});
