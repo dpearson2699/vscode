@@ -1471,6 +1471,8 @@ export interface IChatSendRequestOptions {
 	 * When true, only requests from the same chat mode are included in agent
 	 * history. Useful for custom-agent handoffs where source-agent responses can
 	 * otherwise conflict with the target agent's instructions.
+	 *
+	 * Custom modes are always history-scoped by mode, even when this is unset.
 	 */
 	modeScopedHistory?: boolean;
 
