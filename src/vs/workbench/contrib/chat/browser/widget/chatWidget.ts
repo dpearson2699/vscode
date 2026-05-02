@@ -55,7 +55,7 @@ import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { applyingChatEditsFailedContextKey, decidedChatEditingResourceContextKey, hasAppliedChatEditsContextKey, hasUndecidedChatEditingResourceContextKey, IChatEditingService, IChatEditingSession, inChatEditingSessionContextKey, ModifiedFileEntryState } from '../../common/editing/chatEditingService.js';
 import { IChatLayoutService } from '../../common/widget/chatLayoutService.js';
 import { IChatModel, IChatModelInputState, IChatResponseModel } from '../../common/model/chatModel.js';
-import { ChatMode, getModeNameForTelemetry, IChatMode, IChatModeService, resolveHandoffTargetMode } from '../../common/chatModes.js';
+import { ChatMode, getModeNameForTelemetry, IChatMode, resolveHandoffTargetMode } from '../../common/chatModes.js';
 import { chatAgentLeader, ChatRequestAgentPart, ChatRequestDynamicVariablePart, ChatRequestSlashPromptPart, ChatRequestToolPart, ChatRequestToolSetPart, chatSubcommandLeader, formatChatQuestion, IParsedChatRequest } from '../../common/requestParser/chatParserTypes.js';
 import { ChatRequestParser } from '../../common/requestParser/chatRequestParser.js';
 import { getDynamicVariablesForWidget, getSelectedToolAndToolSetsForWidget } from '../attachments/chatVariables.js';
@@ -409,7 +409,6 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		@IPromptsService private readonly promptsService: IPromptsService,
 		@ICustomizationHarnessService private readonly customizationHarnessService: ICustomizationHarnessService,
 		@ILanguageModelToolsService private readonly toolsService: ILanguageModelToolsService,
-		@IChatModeService private readonly chatModeService: IChatModeService,
 		@IChatLayoutService private readonly chatLayoutService: IChatLayoutService,
 		@IChatEntitlementService private readonly chatEntitlementService: IChatEntitlementService,
 		@IChatSessionsService private readonly chatSessionsService: IChatSessionsService,
@@ -1271,14 +1270,15 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// Fall back to the current mode picker for old sessions where modeInfo was not persisted.
 		const modeInfo = lastItem.model.request?.modeInfo;
 		let responseMode: IChatMode | undefined;
+		const modes = this.input.currentChatModesObs.get();
 		if (modeInfo?.modeInstructions?.uri) {
-			responseMode = this.chatModeService.findModeById(modeInfo.modeInstructions.uri.toString());
+			responseMode = modes.findModeById(modeInfo.modeInstructions.uri.toString());
 		}
 		if (!responseMode && modeInfo?.modeInstructions?.name) {
-			responseMode = resolveHandoffTargetMode(this.chatModeService, modeInfo.modeInstructions.name);
+			responseMode = resolveHandoffTargetMode(modes, modeInfo.modeInstructions.name);
 		}
 		if (!responseMode && modeInfo?.modeId) {
-			responseMode = this.chatModeService.findModeById(modeInfo.modeId);
+			responseMode = modes.findModeById(modeInfo.modeId);
 		}
 		if (!responseMode) {
 			responseMode = this.input.currentModeObs.get();
@@ -1331,7 +1331,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 		// Log telemetry
 		const currentMode = this.input.currentModeObs.get();
-		const toMode = handoff.agent ? resolveHandoffTargetMode(this.chatModeService, handoff.agent) : undefined;
+		const toMode = handoff.agent ? resolveHandoffTargetMode(this.input.currentChatModesObs.get(), handoff.agent) : undefined;
 		this.telemetryService.publicLog2<ChatHandoffClickEvent, ChatHandoffClickClassification>('chat.handoffClicked', {
 			fromAgent: getModeNameForTelemetry(currentMode),
 			toAgent: agentId || (toMode ? getModeNameForTelemetry(toMode) : ''),
@@ -2049,7 +2049,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		// Set the input model on the inputPart before assigning this.viewModel. Assigning this.viewModel
 		// fires onDidChangeViewModel, which ChatInputPart listens to and expects the input model to be initialized.
 		// Pass input model reference to input part for state syncing
-		this.inputPart.setInputModel(model.inputModel, model.getRequests().length === 0);
+		this.inputPart.setInputModel(model.inputModel, model.getRequests().length === 0, model.sessionResource);
 
 		this.viewModel = this.instantiationService.createInstance(ChatViewModel, model, undefined);
 
@@ -2872,7 +2872,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private async _switchToAgentByName(agentName: string): Promise<IChatHandoffAgentSwitchResult> {
 		const currentAgent = this.input.currentModeObs.get();
-		const agent = resolveHandoffTargetMode(this.chatModeService, agentName);
+		const agent = resolveHandoffTargetMode(this.input.currentChatModesObs.get(), agentName);
 		if (!agent) {
 			return { success: false, reason: `target agent '${agentName}' was not found` };
 		}

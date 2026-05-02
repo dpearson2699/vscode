@@ -7,6 +7,7 @@ import assert from 'assert';
 import { constObservable, observableValue } from '../../../../../base/common/observable.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { buildCustomAgentHandoffsInfo, getHandoffId, IChatMode, resolveHandoffTargetMode } from '../../common/chatModes.js';
+import { localChatSessionType } from '../../common/chatSessionsService.js';
 import { ChatModeKind } from '../../common/constants.js';
 import { IHandOff } from '../../common/promptSyntax/promptFileParser.js';
 import { Target } from '../../common/promptSyntax/promptTypes.js';
@@ -145,15 +146,16 @@ suite('resolveHandoffTargetMode', () => {
 			kind: ChatModeKind.Agent,
 		});
 		const service = new MockChatModeService({ builtin: [], custom: [fixIssueMode, reviewMode] });
+		const modes = service.getModes(localChatSessionType);
 
 		const resolvedIds = [
-			resolveHandoffTargetMode(service, 'Fix Issue')?.id,
-			resolveHandoffTargetMode(service, ' Fix Issue ')?.id,
-			resolveHandoffTargetMode(service, 'file:///agents/fix-issue.agent.md')?.id,
-			resolveHandoffTargetMode(service, 'fix issue')?.id,
-			resolveHandoffTargetMode(service, 'FILE:///AGENTS/FIX-ISSUE.AGENT.MD')?.id,
-			resolveHandoffTargetMode(service, 'missing')?.id,
-			resolveHandoffTargetMode(service, '   ')?.id,
+			resolveHandoffTargetMode(modes, 'Fix Issue')?.id,
+			resolveHandoffTargetMode(modes, ' Fix Issue ')?.id,
+			resolveHandoffTargetMode(modes, 'file:///agents/fix-issue.agent.md')?.id,
+			resolveHandoffTargetMode(modes, 'fix issue')?.id,
+			resolveHandoffTargetMode(modes, 'FILE:///AGENTS/FIX-ISSUE.AGENT.MD')?.id,
+			resolveHandoffTargetMode(modes, 'missing')?.id,
+			resolveHandoffTargetMode(modes, '   ')?.id,
 		];
 
 		assert.deepStrictEqual(resolvedIds, [
@@ -180,7 +182,7 @@ suite('resolveHandoffTargetMode', () => {
 		});
 		const service = new MockChatModeService({ builtin: [], custom: [idMatchMode, nameMatchMode] });
 
-		assert.strictEqual(resolveHandoffTargetMode(service, 'shared-target')?.id, 'name-match');
+		assert.strictEqual(resolveHandoffTargetMode(service.getModes(localChatSessionType), 'shared-target')?.id, 'name-match');
 	});
 
 	test('should not resolve ambiguous case-insensitive handoff targets', () => {
@@ -196,6 +198,6 @@ suite('resolveHandoffTargetMode', () => {
 		});
 		const service = new MockChatModeService({ builtin: [], custom: [firstMode, secondMode] });
 
-		assert.strictEqual(resolveHandoffTargetMode(service, 'FIX ISSUE'), undefined);
+		assert.strictEqual(resolveHandoffTargetMode(service.getModes(localChatSessionType), 'FIX ISSUE'), undefined);
 	});
 });

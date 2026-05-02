@@ -13,7 +13,8 @@ import { TestInstantiationService } from '../../../../../../platform/instantiati
 import { IChatWidget, IChatWidgetService } from '../../../browser/chat.js';
 import { GetHandoffsActionId, ExecuteHandoffActionId, registerChatExecuteActions } from '../../../browser/actions/chatExecuteActions.js';
 import type { IChatHandoffExecutionResult } from '../../../browser/widget/chatHandoffExecution.js';
-import { IChatMode, IChatModeService, ICustomAgentInfo } from '../../../common/chatModes.js';
+import { IChatMode, IChatModes, IChatModeService, ICustomAgentInfo } from '../../../common/chatModes.js';
+import { SessionType } from '../../../common/chatSessionsService.js';
 import { ChatModeKind } from '../../../common/constants.js';
 import { IHandOff } from '../../../common/promptSyntax/promptFileParser.js';
 import { Target } from '../../../common/promptSyntax/promptTypes.js';
@@ -162,11 +163,12 @@ suite('ExecuteHandoffAction', () => {
 		handOffs: observableValue('handOffs', testHandoffs),
 	});
 
-	function createMockWidget(currentMode: IChatMode, executeHandoffResult: IChatHandoffExecutionResult = { success: true, submitted: true }): { widget: Partial<IChatWidget>; executeHandoffCalls: IHandOff[] } {
+	function createMockWidget(currentMode: IChatMode, chatModes: IChatModes = new MockChatModeService({ builtin: currentMode.isBuiltin ? [currentMode] : [], custom: currentMode.isBuiltin ? [] : [currentMode] }).getModes(SessionType.Local), executeHandoffResult: IChatHandoffExecutionResult = { success: true, submitted: true }): { widget: Partial<IChatWidget>; executeHandoffCalls: IHandOff[] } {
 		const executeHandoffCalls: IHandOff[] = [];
 		const widget: Partial<IChatWidget> = {
 			input: {
 				currentModeObs: constObservable(currentMode),
+				currentChatModesObs: constObservable(chatModes),
 			} as IChatWidget['input'],
 			executeHandoff: async (handoff: IHandOff) => {
 				executeHandoffCalls.push(handoff);
@@ -295,7 +297,8 @@ suite('ExecuteHandoffAction', () => {
 
 	test('should resolve sourceCustomAgent to look up handoffs from a different mode', async () => {
 		const askMode = createMockMode({ id: 'ask', kind: ChatModeKind.Ask, isBuiltin: true });
-		const { widget, executeHandoffCalls } = createMockWidget(askMode); // widget is in "ask" mode (no handoffs)
+		const chatModeService = new MockChatModeService({ builtin: [askMode], custom: [planMode] });
+		const { widget, executeHandoffCalls } = createMockWidget(askMode, await chatModeService.awaitModes(SessionType.Local)); // widget is in "ask" mode (no handoffs)
 
 		const mockWidgetService = new class extends MockChatWidgetService {
 			override readonly lastFocusedWidget = widget as IChatWidget;
@@ -303,7 +306,7 @@ suite('ExecuteHandoffAction', () => {
 
 		// The plan mode has handoffs; sourceCustomAgent overrides the widget's current mode
 		instantiationService.set(IChatWidgetService, mockWidgetService);
-		instantiationService.set(IChatModeService, new MockChatModeService({ builtin: [askMode], custom: [planMode] }));
+		instantiationService.set(IChatModeService, chatModeService);
 
 		const handler = CommandsRegistry.getCommand(ExecuteHandoffActionId)?.handler;
 		assert.ok(handler);
@@ -336,14 +339,15 @@ suite('ExecuteHandoffAction', () => {
 	});
 
 	test('should return error when widget aborts handoff execution', async () => {
-		const { widget, executeHandoffCalls } = createMockWidget(planMode, { success: false, error: 'target agent was not found' });
+		const chatModeService = new MockChatModeService({ builtin: [], custom: [planMode] });
+		const { widget, executeHandoffCalls } = createMockWidget(planMode, await chatModeService.awaitModes(SessionType.Local), { success: false, error: 'target agent was not found' });
 
 		const mockWidgetService = new class extends MockChatWidgetService {
 			override readonly lastFocusedWidget = widget as IChatWidget;
 		};
 
 		instantiationService.set(IChatWidgetService, mockWidgetService);
-		instantiationService.set(IChatModeService, new MockChatModeService({ builtin: [], custom: [planMode] }));
+		instantiationService.set(IChatModeService, chatModeService);
 
 		const handler = CommandsRegistry.getCommand(ExecuteHandoffActionId)?.handler;
 		assert.ok(handler);
