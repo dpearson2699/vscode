@@ -20,7 +20,7 @@ function makeTool(name: string): LanguageModelToolInformation {
 }
 
 describe('BuiltInToolGroupHandler', () => {
-	it('keeps memory available as an individual core tool', () => {
+	it('keeps memory in the VS Code interaction tool group', () => {
 		const handler = new BuiltInToolGroupHandler();
 		const tools = [
 			makeTool(ToolName.Memory),
@@ -34,10 +34,11 @@ describe('BuiltInToolGroupHandler', () => {
 
 		expect(groupedVsCodeInteraction).toBeDefined();
 		expect(groupedVsCodeInteraction?.contents.map(tool => tool.name)).toEqual([
+			ToolName.Memory,
 			ToolName.InstallExtension,
 			ToolName.RunVscodeCmd,
 		]);
-		expect(result.some((tool): boolean => !(tool instanceof VirtualTool) && tool.name === ToolName.Memory)).toBe(true);
+		expect(result.some((tool): boolean => !(tool instanceof VirtualTool) && tool.name === ToolName.Memory)).toBe(false);
 		expect(result.some((tool): boolean => !(tool instanceof VirtualTool) && tool.name === ToolName.ReadFile)).toBe(true);
 	});
 });

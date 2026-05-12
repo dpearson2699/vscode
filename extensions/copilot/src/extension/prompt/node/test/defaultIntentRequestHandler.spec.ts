@@ -32,7 +32,7 @@ import { Conversation, Turn } from '../../common/conversation';
 import { IBuildPromptContext } from '../../common/intents';
 import { ToolCallRound } from '../../common/toolCallRound';
 import { ChatTelemetryBuilder } from '../chatParticipantTelemetry';
-import { DefaultIntentRequestHandler } from '../defaultIntentRequestHandler';
+import { DefaultIntentRequestHandler, getToolReferenceNamesToExpand } from '../defaultIntentRequestHandler';
 import { IIntent, IIntentInvocation, nullRenderPromptResult, promptResultMetadata } from '../intents';
 
 suite('defaultIntentRequestHandler', () => {
@@ -242,6 +242,23 @@ suite('defaultIntentRequestHandler', () => {
 		expect(requestSpy).toHaveBeenCalledOnce();
 		expect(requestSpy.mock.calls[0][0].modeChanged).toBe(false);
 		expect(requestSpy.mock.calls[0][0].ignoreStatefulMarker).toBeUndefined();
+	});
+
+	test('expands explicit tool references from active mode instructions', () => {
+		const request = new TestChatRequest();
+		(request as any).toolReferences = [{ name: 'copilot_memory' }];
+		(request as any).modeInstructions2 = {
+			name: 'Memory Probe',
+			content: 'agent instructions',
+			isBuiltin: false,
+			toolReferences: [{ name: 'vscode/memory' }],
+		};
+
+		expect(getToolReferenceNamesToExpand(request)).toEqual([
+			'copilot_memory',
+			'memory',
+			'vscode/memory',
+		]);
 	});
 
 	test('makes a tool call turn', async () => {

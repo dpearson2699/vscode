@@ -46,6 +46,7 @@ import { EmptyPromptError, IToolCallingBuiltPromptEvent, IToolCallingLoopOptions
 import { UnknownIntent } from '../../intents/node/unknownIntent';
 import { ResponseStreamWithLinkification } from '../../linkify/common/responseStreamWithLinkification';
 import { SummarizedConversationHistoryMetadata } from '../../prompts/node/agent/summarizedConversationHistory';
+import { getToolName } from '../../tools/common/toolNames';
 import { normalizeToolSchema } from '../../tools/common/toolSchemaNormalizer';
 import { ToolCallCancelledError } from '../../tools/common/toolsService';
 import { IToolGrouping, IToolGroupingService } from '../../tools/common/virtualTools/virtualToolTypes';
@@ -590,6 +591,37 @@ interface IInternalRequestResult {
 	lastRequestTelemetry: ChatTelemetry;
 }
 
+/**
+ * Gets concrete tool names that should be kept expanded because the request or
+ * active mode instructions explicitly referenced them.
+ *
+ * @internal exported for testing
+ */
+export function getToolReferenceNamesToExpand(request: ChatRequest): string[] {
+	const toolNames = new Set<string>();
+
+	const addToolName = (name: string) => {
+		toolNames.add(name);
+		toolNames.add(getToolName(name));
+
+		const slashIndex = name.lastIndexOf('/');
+		if (slashIndex >= 0 && slashIndex < name.length - 1) {
+			const shortName = name.slice(slashIndex + 1);
+			toolNames.add(shortName);
+			toolNames.add(getToolName(shortName));
+		}
+	};
+
+	for (const ref of request.toolReferences) {
+		addToolName(ref.name);
+	}
+	for (const ref of request.modeInstructions2?.toolReferences ?? []) {
+		addToolName(ref.name);
+	}
+
+	return [...toolNames];
+}
+
 interface IDefaultToolLoopOptions extends IToolCallingLoopOptions {
 	invocation: IIntentInvocation;
 	intent: IIntent;
@@ -787,8 +819,8 @@ class DefaultToolCallingLoop extends ToolCallingLoop<IDefaultToolLoopOptions> {
 			this.toolGrouping.tools = tools;
 		} else {
 			this.toolGrouping = this.toolGroupingService.create(this.options.conversation.sessionId, tools);
-			for (const ref of this.options.request.toolReferences) {
-				this.toolGrouping.ensureExpanded(ref.name);
+			for (const toolName of getToolReferenceNamesToExpand(this.options.request)) {
+				this.toolGrouping.ensureExpanded(toolName);
 			}
 		}
 
